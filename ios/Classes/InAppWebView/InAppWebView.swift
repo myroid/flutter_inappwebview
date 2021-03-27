@@ -53,6 +53,8 @@ public class InAppWebView: WKWebView, UIScrollViewDelegate, WKUIDelegate, WKNavi
     
     var callAsyncJavaScriptBelowIOS14Results: [String:((Any?) -> Void)] = [:]
     
+    var oldZoomScale = Float(1.0)
+    
     init(frame: CGRect, configuration: WKWebViewConfiguration, contextMenu: [String: Any]?, channel: FlutterMethodChannel?, userScripts: [UserScript] = []) {
         super.init(frame: frame, configuration: configuration)
         self.channel = channel
@@ -270,6 +272,7 @@ public class InAppWebView: WKWebView, UIScrollViewDelegate, WKUIDelegate, WKNavi
         scrollView.addGestureRecognizer(self.longPressRecognizer)
         scrollView.addGestureRecognizer(self.recognizerForDisablingContextMenuOnLinks)
         scrollView.addObserver(self, forKeyPath: #keyPath(UIScrollView.contentOffset), options: [.new, .old], context: nil)
+        scrollView.addObserver(self, forKeyPath: #keyPath(UIScrollView.zoomScale), options: [.new, .old], context: nil)
         
         addObserver(self,
                     forKeyPath: #keyPath(WKWebView.estimatedProgress),
@@ -412,19 +415,19 @@ public class InAppWebView: WKWebView, UIScrollViewDelegate, WKUIDelegate, WKNavi
     }
     
     public func prepareAndAddUserScripts() -> Void {
-        if let applePayAPIEnabled = options?.applePayAPIEnabled, applePayAPIEnabled {
-            return
-        }
-        
         if windowId != nil {
             // The new created window webview has the same WKWebViewConfiguration variable reference.
             // So, we cannot set another WKWebViewConfiguration for it unfortunately!
             // This is a limitation of the official WebKit API.
             return
         }
-        
         configuration.userContentController = WKUserContentController()
         configuration.userContentController.initialize()
+        
+        if let applePayAPIEnabled = options?.applePayAPIEnabled, applePayAPIEnabled {
+            return
+        }
+        
         configuration.userContentController.addPluginScript(PROMISE_POLYFILL_JS_PLUGIN_SCRIPT)
         configuration.userContentController.addPluginScript(JAVASCRIPT_BRIDGE_JS_PLUGIN_SCRIPT)
         configuration.userContentController.addPluginScript(CONSOLE_LOG_JS_PLUGIN_SCRIPT)
@@ -2025,12 +2028,12 @@ public class InAppWebView: WKWebView, UIScrollViewDelegate, WKUIDelegate, WKNavi
                 scrollView.contentOffset = CGPoint(x: lastScrollX, y: lastScrollY);
             }
             else if disableVerticalScroll {
-                if (scrollView.contentOffset.y >= 0 || scrollView.contentOffset.y < 0) {
+                if scrollView.contentOffset.y >= 0 || scrollView.contentOffset.y < 0 {
                     scrollView.contentOffset = CGPoint(x: scrollView.contentOffset.x, y: lastScrollY);
                 }
             }
             else if disableHorizontalScroll {
-                if (scrollView.contentOffset.x >= 0 || scrollView.contentOffset.x < 0) {
+                if scrollView.contentOffset.x >= 0 || scrollView.contentOffset.x < 0 {
                     scrollView.contentOffset = CGPoint(x: lastScrollX, y: scrollView.contentOffset.y);
                 }
             }
@@ -2044,6 +2047,24 @@ public class InAppWebView: WKWebView, UIScrollViewDelegate, WKUIDelegate, WKNavi
         }
         lastScrollX = scrollView.contentOffset.x
         lastScrollY = scrollView.contentOffset.y
+        
+        let overScrolledHorizontally = lastScrollX < 0 || lastScrollX > (scrollView.contentSize.width - scrollView.frame.size.width)
+        let overScrolledVertically = lastScrollY < 0 || lastScrollY > (scrollView.contentSize.height - scrollView.frame.size.height)
+        if overScrolledHorizontally || overScrolledVertically {
+            let x = Int(lastScrollX / scrollView.contentScaleFactor)
+            let y = Int(lastScrollY / scrollView.contentScaleFactor)
+            self.onOverScrolled(x: x, y: y,
+                           clampedX: overScrolledHorizontally,
+                           clampedY: overScrolledVertically)
+        }
+    }
+    
+    public func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        let newScale = Float(scrollView.zoomScale)
+        if newScale != oldZoomScale {
+            self.onZoomScaleChanged(newScale: newScale, oldScale: oldZoomScale)
+            oldZoomScale = newScale
+        }
     }
     
     public func webView(_ webView: WKWebView,
@@ -2294,6 +2315,16 @@ public class InAppWebView: WKWebView, UIScrollViewDelegate, WKUIDelegate, WKNavi
     public func onScrollChanged(x: Int, y: Int) {
         let arguments: [String: Any] = ["x": x, "y": y]
         channel?.invokeMethod("onScrollChanged", arguments: arguments)
+    }
+    
+    public func onZoomScaleChanged(newScale: Float, oldScale: Float) {
+        let arguments: [String: Any] = ["newScale": newScale, "oldScale": oldScale]
+        channel?.invokeMethod("onZoomScaleChanged", arguments: arguments)
+    }
+    
+    public func onOverScrolled(x: Int, y: Int, clampedX: Bool, clampedY: Bool) {
+        let arguments: [String: Any] = ["x": x, "y": y, "clampedX": clampedX, "clampedY": clampedY]
+        channel?.invokeMethod("onOverScrolled", arguments: arguments)
     }
     
     public func onDownloadStart(url: String) {
@@ -2663,7 +2694,7 @@ if(window.\(JAVASCRIPT_BRIDGE_NAME)[\(_callHandlerID)] != null) {
         scrollView.setZoomScale(currentZoomScale * CGFloat(zoomFactor), animated: animated)
     }
     
-    public func getScale() -> Float {
+    public func getZoomScale() -> Float {
         return Float(scrollView.zoomScale)
     }
     
@@ -2854,6 +2885,7 @@ if(window.\(JAVASCRIPT_BRIDGE_NAME)[\(_callHandlerID)] != null) {
             imp_removeBlock(imp)
         }
         scrollView.removeObserver(self, forKeyPath: #keyPath(UIScrollView.contentOffset))
+        scrollView.removeObserver(self, forKeyPath: #keyPath(UIScrollView.zoomScale))
         longPressRecognizer.removeTarget(self, action: #selector(longPressGestureDetected))
         longPressRecognizer.delegate = nil
         scrollView.removeGestureRecognizer(longPressRecognizer)

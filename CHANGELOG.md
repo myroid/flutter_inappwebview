@@ -1,8 +1,33 @@
+## 5.3.0
+
+- Added `initialSize` property to the `HeadlessInAppWebView` class
+- Added `setSize` and `getSize` methods to the `HeadlessInAppWebView` class
+- `androidOnScaleChanged` WebView event is now deprecated. Use the new `onZoomScaleChanged` WebView event, that is available for both Android and iOS
+- `getScale` WebView method is now deprecated. Use the new `getZoomScale` WebView method
+- Removed `final` keyword for all `HeadlessInAppWebView` events
+- Fixed wrong usage of Android WebView scale property
+- Fixed "java.lang.NullPointerException: com.pichillilorenzo.flutter_inappwebview.in_app_webview.InAppWebViewRenderProcessClient$1.success(InAppWebViewRenderProcessClient.java:37)" [#757](https://github.com/pichillilorenzo/flutter_inappwebview/issues/757)
+
+## 5.2.1+1
+
+- Fixed iOS "Unexpectedly found nil while unwrapping an Optional value: file flutter_inappwebview/WKUserContentController.swift, line 36" error when `applePayAPIEnabled` iOS-specific WebView option is enabled
+
+## 5.2.1
+
+- Added `isRunning` method to the `HeadlessInAppWebView` class
+- Added `isRunning` method to the `InAppLocalhostServer` class
+- Added `allowGoBackWithBackButton` and `shouldCloseOnBackButtonPressed` Android-specific InAppBrowser options
+- Fixed iOS `WebMessageListener` javascript implementation not calling event listeners when `onmessage` is set
+- Fixed `onCreateContextMenu` event on Android where `hitTestResult` has always `null` values
+- Fixed "java.lang.NullPointerException: Attempt to invoke virtual method 'void android.widget.SearchView.setQuery(java.lang.CharSequence, boolean)' on a null object reference" [#742](https://github.com/pichillilorenzo/flutter_inappwebview/issues/742)
+- Fixed Android js error in some very rare case where `window.flutter_inappwebview` is `undefined` when loading plugin scripts
+
 ## 5.2.0
 
 - Added `WebMessageChannel` and `WebMessageListener` features
 - Added `canScrollVertically` and `canScrollHorizontally` webview methods
 - Added Android pull-to-refresh `setSize` method and `size` option
+- Added `onOverScrolled` WebView event
 - `AndroidInAppWebViewController.getCurrentWebViewPackage` is available now starting from Android API 21+
 - Updated Android Gradle distributionUrl version to `5.6.4`
 - Updated Android `androidx.webkit:webkit` to `1.4.0`, `androidx.browser:browser` to `1.3.0`, `androidx.appcompat:appcompat` to `1.2.0`
@@ -13,6 +38,7 @@
 - Fixed iOS sometimes `scrollView.contentSize` doesn't fit all the `frame.size` available
 - Fixed ajax and fetch interceptor when the data/body sent is not a string
 - Fixed "InAppLocalhostServer - Error: type 'List<dynamic>' is not a subtype of type 'List<int>' in type cast" [#724](https://github.com/pichillilorenzo/flutter_inappwebview/issues/724)
+- Merge "fix proguard" [#737](https://github.com/pichillilorenzo/flutter_inappwebview/pull/737) (thanks to [myroid](https://github.com/myroid))
 
 ### BREAKING CHANGES
 
