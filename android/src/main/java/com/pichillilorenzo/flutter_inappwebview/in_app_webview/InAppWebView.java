@@ -22,6 +22,7 @@ import android.util.AttributeSet;
 import android.util.Log;
 import android.view.ActionMode;
 import android.view.ContextMenu;
+import android.view.DragEvent;
 import android.view.GestureDetector;
 import android.view.LayoutInflater;
 import android.view.Menu;
@@ -51,9 +52,9 @@ import androidx.annotation.RequiresApi;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
 
+import com.pichillilorenzo.flutter_inappwebview.InAppWebViewFlutterPlugin;
 import com.pichillilorenzo.flutter_inappwebview.JavaScriptBridgeInterface;
 import com.pichillilorenzo.flutter_inappwebview.R;
-import com.pichillilorenzo.flutter_inappwebview.Shared;
 import com.pichillilorenzo.flutter_inappwebview.Util;
 import com.pichillilorenzo.flutter_inappwebview.content_blocker.ContentBlocker;
 import com.pichillilorenzo.flutter_inappwebview.content_blocker.ContentBlockerAction;
@@ -102,6 +103,8 @@ final public class InAppWebView extends InputAwareWebView {
 
   static final String LOG_TAG = "InAppWebView";
 
+  @Nullable
+  public InAppWebViewFlutterPlugin plugin;
   @Nullable
   public InAppBrowserDelegate inAppBrowserDelegate;
   public MethodChannel channel;
@@ -155,18 +158,20 @@ final public class InAppWebView extends InputAwareWebView {
     super(context, attrs, defaultStyle);
   }
 
-  public InAppWebView(Context context, MethodChannel channel, Object id,
+  public InAppWebView(Context context, InAppWebViewFlutterPlugin plugin,
+                      MethodChannel channel, Object id,
                       @Nullable Integer windowId, InAppWebViewOptions options,
                       @Nullable Map<String, Object> contextMenu, View containerView,
                       List<UserScript> userScripts) {
     super(context, containerView, options.useHybridComposition);
+    this.plugin = plugin;
     this.channel = channel;
     this.id = id;
     this.windowId = windowId;
     this.options = options;
     this.contextMenu = contextMenu;
     this.userContentController.addUserOnlyScripts(userScripts);
-    Shared.activity.registerForContextMenu(this);
+    plugin.activity.registerForContextMenu(this);
   }
 
   @Override
@@ -181,7 +186,7 @@ final public class InAppWebView extends InputAwareWebView {
     javaScriptBridgeInterface = new JavaScriptBridgeInterface(this);
     addJavascriptInterface(javaScriptBridgeInterface, JavaScriptBridgeJS.JAVASCRIPT_BRIDGE_NAME);
 
-    inAppWebViewChromeClient = new InAppWebViewChromeClient(channel, inAppBrowserDelegate);
+    inAppWebViewChromeClient = new InAppWebViewChromeClient(plugin, channel, inAppBrowserDelegate);
     setWebChromeClient(inAppWebViewChromeClient);
 
     inAppWebViewClient = new InAppWebViewClient(channel, inAppBrowserDelegate);
@@ -474,22 +479,6 @@ final public class InAppWebView extends InputAwareWebView {
         return false;
       }
     });
-
-    getViewTreeObserver().addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
-      @Override
-      public void onGlobalLayout() {
-        final boolean canScrollVertical = canScrollVertically();
-        ViewParent parent = getParent();
-        if (parent instanceof PullToRefreshLayout) {
-          PullToRefreshLayout pullToRefreshLayout = (PullToRefreshLayout) parent;
-          if (!canScrollVertical) {
-            pullToRefreshLayout.setEnabled(false);
-          } else {
-            pullToRefreshLayout.setEnabled(pullToRefreshLayout.options.enabled);
-          }
-        }
-      }
-    });
   }
 
   public void setIncognito(boolean enabled) {
@@ -551,7 +540,7 @@ final public class InAppWebView extends InputAwareWebView {
   }
 
   public void loadFile(String assetFilePath) throws IOException {
-    loadUrl(Util.getUrlAsset(assetFilePath));
+    loadUrl(Util.getUrlAsset(plugin, assetFilePath));
   }
 
   public boolean isLoading() {
@@ -1030,7 +1019,18 @@ final public class InAppWebView extends InputAwareWebView {
       }
       String idAttr = (String) scriptHtmlTagAttributes.get("id");
       if (idAttr != null) {
-        scriptAttributes += " script.id = '" + idAttr.replaceAll("'", "\\\\'") + "'; ";
+        String scriptIdEscaped = idAttr.replaceAll("'", "\\\\'");
+        scriptAttributes += " script.id = '" + scriptIdEscaped + "'; ";
+        scriptAttributes += " script.onload = function() {" +
+        "  if (window." + JavaScriptBridgeJS.JAVASCRIPT_BRIDGE_NAME + " != null) {" +
+        "    window." + JavaScriptBridgeJS.JAVASCRIPT_BRIDGE_NAME + ".callHandler('onInjectedScriptLoaded', '" + scriptIdEscaped + "');" +
+        "  }" +
+        "};";
+        scriptAttributes += " script.onerror = function() {" +
+        "  if (window." + JavaScriptBridgeJS.JAVASCRIPT_BRIDGE_NAME + " != null) {" +
+        "    window." + JavaScriptBridgeJS.JAVASCRIPT_BRIDGE_NAME + ".callHandler('onInjectedScriptError', '" + scriptIdEscaped + "');" +
+        "  }" +
+        "};";
       }
       Boolean asyncAttr = (Boolean) scriptHtmlTagAttributes.get("async");
       if (asyncAttr != null && asyncAttr) {
@@ -1208,7 +1208,7 @@ final public class InAppWebView extends InputAwareWebView {
   @RequiresApi(api = Build.VERSION_CODES.LOLLIPOP)
   public void printCurrentPage() {
     // Get a PrintManager instance
-    PrintManager printManager = (PrintManager) Shared.activity.getSystemService(Context.PRINT_SERVICE);
+    PrintManager printManager = (PrintManager) plugin.activity.getSystemService(Context.PRINT_SERVICE);
 
     if (printManager != null) {
       String jobName = getTitle() + " Document";
@@ -1244,6 +1244,15 @@ final public class InAppWebView extends InputAwareWebView {
   @Override
   public boolean onTouchEvent(MotionEvent ev) {
     lastTouch = new Point((int) ev.getX(), (int) ev.getY());
+
+    ViewParent parent = getParent();
+    if (parent instanceof PullToRefreshLayout) {
+      PullToRefreshLayout pullToRefreshLayout = (PullToRefreshLayout) parent;
+      if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) {
+        pullToRefreshLayout.setEnabled(false);
+      }
+    }
+
     return super.onTouchEvent(ev);
   }
 
@@ -1253,6 +1262,17 @@ final public class InAppWebView extends InputAwareWebView {
 
     boolean overScrolledHorizontally = canScrollHorizontally() && clampedX;
     boolean overScrolledVertically = canScrollVertically() && clampedY;
+
+    ViewParent parent = getParent();
+    if (parent instanceof PullToRefreshLayout && overScrolledVertically && scrollY <= 10) {
+      PullToRefreshLayout pullToRefreshLayout = (PullToRefreshLayout) parent;
+      // change over scroll mode to OVER_SCROLL_NEVER in order to disable temporarily the glow effect
+      setOverScrollMode(OVER_SCROLL_NEVER);
+      pullToRefreshLayout.setEnabled(pullToRefreshLayout.options.enabled);
+      // reset over scroll mode
+      setOverScrollMode(options.overScrollMode);
+    }
+
     if (overScrolledHorizontally || overScrolledVertically) {
       Map<String, Object> obj = new HashMap<>();
       obj.put("x", scrollX);
@@ -1665,6 +1685,7 @@ final public class InAppWebView extends InputAwareWebView {
     inAppWebViewClient = null;
     javaScriptBridgeInterface = null;
     inAppWebViewRenderProcessClient = null;
+    plugin = null;
     super.dispose();
   }
 
